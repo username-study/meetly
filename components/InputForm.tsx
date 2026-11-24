@@ -32,6 +32,7 @@ export function InputForm({
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Place[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [loadingExample, setLoadingExample] = useState(false);
 
   const currentCount = form.participants.length;
   const isMax = currentCount >= MAX_PARTICIPANTS;
@@ -47,6 +48,34 @@ export function InputForm({
     setQuery('');
     setSearchResults([]);
   };
+
+  // 예시로 체험하기: 신촌역 + 강남역을 검색해서 채움
+const pick = (places: Place[] | undefined, keyword: string) =>
+  places?.find((p) => p.name.startsWith(keyword)) ?? places?.[0];
+
+const handleExample = async () => {
+  setLoadingExample(true);
+  try {
+    const [a, b] = await Promise.all([searchPlaces('신촌역'), searchPlaces('강남역')]);
+    const p1 = pick(a.places, '신촌역');
+    const p2 = pick(b.places, '강남역');
+    if (!p1 || !p2) {
+      form.flash('warn', '예시를 불러오지 못했어요. 직접 입력해 주세요.');
+      return;
+    }
+    form.fillExample([
+      { name: '김ㅇㅇ', place: p1 },
+      { name: '정ㅇㅇ', place: p2 },
+    ]);
+    setActiveSearchId(null);
+    setQuery('');
+    setSearchResults([]);
+  } catch {
+    form.flash('warn', '예시를 불러오지 못했어요. 직접 입력해 주세요.');
+  } finally {
+    setLoadingExample(false);
+  }
+};
 
   // 장소 검색 핸들러
   const handleSearch = async (participantId: string, keyword: string) => {
@@ -76,6 +105,17 @@ export function InputForm({
 
   return (
     <div className="space-y-3">
+<button
+  type="button"
+  onClick={handleExample}
+  disabled={loadingExample || calculating}
+  className="w-full rounded-xl border border-primary/30 bg-pale py-2.5 text-xs font-bold text-primary hover:bg-primary/10 transition disabled:opacity-40 disabled:cursor-not-allowed"
+>
+  {loadingExample ? '예시 불러오는 중…' : '✨ 예시로 체험하기 (신촌역 · 강남역)'}
+</button>
+
+
+
       {/* 참석자 인원 제한 안내 뱃지 */}
       <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 border border-slate-200/60">
         <span className="text-[11px] font-bold text-slate-700">👥 참석자 출발지</span>

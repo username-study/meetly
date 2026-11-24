@@ -102,6 +102,12 @@ export function useMeetlyForm(options: { onLoaded?: () => void } = {}) {
     flash("info", "입력을 초기화했어요. 저장된 모임은 그대로 남아 있어요.");
   };
 
+  /** [예시로 체험하기]: 주어진 목록으로 입력을 통째로 교체한다 */
+const fillExample = (examples: Omit<Participant, "id">[]) => {
+  setParticipants(examples.map((e) => ({ id: newId(), ...e })));
+  flash("ok", "예시를 채웠어요. [최적 장소 계산하기]를 눌러 보세요!");
+};
+
   const removeGroup = (id: string) => {
     deleteGroup(id);
     setGroups(listGroups());
@@ -111,8 +117,10 @@ export function useMeetlyForm(options: { onLoaded?: () => void } = {}) {
 
   return {
     participants, groups, status, readyCount, canCalculate,
-    update, add, remove, reset, save, load, loadLatest, removeGroup, refreshGroups, flash,
+    update, add, remove, reset, save, load, loadLatest, removeGroup, fillExample, refreshGroups, flash,
   };
 }
+
+
 
 export type MeetlyForm = ReturnType<typeof useMeetlyForm>;
