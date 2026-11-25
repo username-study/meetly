@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { MapPin, Clock, Users, ArrowRight, ChevronDown, ChevronUp, Sparkles, Check } from 'lucide-react';
+import { MapPin, Users, ChevronDown, ChevronUp, Sparkles, BookmarkCheck, Check } from 'lucide-react';
 import Footer from '@/components/Footer';
 import KakaoMap, { type MapMarker } from '@/components/KakaoMap';
 import ShareButton from '@/components/ShareButton';
@@ -30,20 +30,20 @@ const LAST_STEP = TABS.length;
 const SAVED_TAB = 6;
 
 const COLOR = {
-  mid: '#11936d',
+  mid: '#059669',
   place: '#7c5cd6',
   pick: '#f59e0b',
 };
 
 const PERSON_COLORS = [
-  '#2f6fed',
-  '#e5484d',
-  '#0d9ea3',
-  '#d6409f',
-  '#8b5e3c',
-  '#3e63dd',
-  '#5b6b7f',
-  '#c2410c',
+  '#2f6fed', // 1: 파랑
+  '#ef4444', // 2: 빨강
+  '#10b981', // 3: 초록
+  '#f59e0b', // 4: 주황
+  '#8b5cf6', // 5: 보라
+  '#ec4899', // 6: 핑크
+  '#06b6d4', // 7: 청록
+  '#64748b', // 8: 슬레이트
 ];
 const personColor = (i: number) => PERSON_COLORS[i % PERSON_COLORS.length];
 
@@ -78,7 +78,7 @@ function EmptyState({ text, onGo }: { text: string; onGo: () => void }) {
       <button
         type="button"
         onClick={onGo}
-        className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-black text-white shadow-md transition hover:bg-emerald-700 active:scale-95"
+        className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-3 text-sm font-black text-white shadow-md transition hover:bg-primary/90 active:scale-95"
       >
         ← 출발지 입력하러 가기
       </button>
@@ -96,11 +96,32 @@ export default function Home() {
   const [nearby, setNearby] = useState<Item[]>([]);
   const [picks, setPicks] = useState<Item[]>([]);
   const [showDetails, setShowDetails] = useState(false);
-  
+
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
 
-  const form = useMeetlyForm({ onLoaded: () => setActiveTab(1) });
+  // 4단계 약속 저장하기 입력 및 완료 메시지 상태
+  const [saveTitleInput, setSaveTitleInput] = useState('');
+  const [completeSavedMsg, setCompleteSavedMsg] = useState('');
+
+  const runCalculateRef = useRef<
+    ((ps: Participant[], pickPlan?: number, initialPicks?: Item[], targetTab?: number) => Promise<void>) | null
+  >(null);
+
+  const form = useMeetlyForm({
+    onLoaded: (group) => {
+      // 4단계에서 저장된 완성 코스(planIndex 또는 picks 포함)라면 즉시 계산 및 후보 장소까지 복원
+      if (group && (group.planIndex !== undefined || (group.picks && group.picks.length > 0))) {
+        const validPs = group.participants.filter((p) => p.place);
+        if (validPs.length >= 2 && runCalculateRef.current) {
+          runCalculateRef.current(validPs, group.planIndex ?? 0, (group.picks as Item[]) ?? [], 4);
+          return;
+        }
+      }
+      setActiveTab(1);
+    },
+  });
+
   const r: MidpointResult | undefined = results[selected];
 
   const togglePick = useCallback((item: Item) => {
@@ -119,18 +140,20 @@ export default function Home() {
     const list: MapMarker[] = [];
     const pickedKeys = new Set(picks.map(pickKey));
     const targetParticipants = activeTab === 1 ? form.participants : calcParticipants;
-    
+
     if (activeTab !== 3) {
       targetParticipants
         .filter((p): p is Participant & { place: NonNullable<Participant['place']> } => !!p.place)
         .forEach((p, i) => {
           const place = p.place;
+          const hasCustomName = p.name && p.name.trim() !== '';
           list.push({
             id: `start-${p.id}`,
             selectId: p.id,
             lat: place.lat,
             lng: place.lng,
-            label: p.name || place.name,
+            label: hasCustomName ? p.name : place.name,
+            subLabel: hasCustomName ? place.name : undefined,
             emoji: '🚩',
             color: personColor(i),
             compact: false,
@@ -141,14 +164,13 @@ export default function Home() {
 
     if (!r) return list;
 
-    // 중간지점 📍 핀
     const rankLabel = selected === 0 ? '1안' : selected === 1 ? '2안' : '3안';
     list.push({
       id: 'mid',
       lat: r.place.lat,
       lng: r.place.lng,
       label: `[${rankLabel}] ${r.place.name}`,
-      emoji: '📍',
+      emoji: '★',
       big: true,
       color: COLOR.mid,
     });
@@ -201,22 +223,29 @@ export default function Home() {
     selectedPlaceId,
   ]);
 
-  const runCalculate = useCallback(async (ps: Participant[], pickPlan = 0, initialPicks: Item[] = []) => {
-    setCalculating(true);
-    setCalcError('');
-    try {
-      const { results: res } = await calculateMidpoints(ps);
-      setResults(res);
-      setCalcParticipants(ps);
-      setSelected(Math.min(Math.max(pickPlan, 0), res.length - 1));
-      setPicks(initialPicks);
-      setActiveTab(2);
-    } catch (e) {
-      setCalcError((e as Error).message);
-    } finally {
-      setCalculating(false);
-    }
-  }, []);
+  const runCalculate = useCallback(
+    async (ps: Participant[], pickPlan = 0, initialPicks: Item[] = [], targetTab = 2) => {
+      setCalculating(true);
+      setCalcError('');
+      try {
+        const { results: res } = await calculateMidpoints(ps);
+        setResults(res);
+        setCalcParticipants(ps);
+        setSelected(Math.min(Math.max(pickPlan, 0), res.length - 1));
+        setPicks(initialPicks);
+        setSaveTitleInput('');
+        setCompleteSavedMsg('');
+        setActiveTab(targetTab);
+      } catch (e) {
+        setCalcError((e as Error).message);
+      } finally {
+        setCalculating(false);
+      }
+    },
+    []
+  );
+
+  runCalculateRef.current = runCalculate;
 
   const restored = useRef(false);
   useEffect(() => {
@@ -233,7 +262,7 @@ export default function Home() {
       kind: p.k,
       place: { id: `share-pick-${i}`, name: p.n, address: p.a, lat: p.lat, lng: p.lng, url: p.u },
     }));
-    runCalculate(ps, payload.plan, sharedPicks);
+    runCalculate(ps, payload.plan, sharedPicks, 2);
   }, [runCalculate]);
 
   const startNew = () => {
@@ -244,6 +273,8 @@ export default function Home() {
     setSelected(0);
     setPicks([]);
     setCalcError('');
+    setSaveTitleInput('');
+    setCompleteSavedMsg('');
     setActiveTab(1);
   };
 
@@ -260,6 +291,36 @@ export default function Home() {
     if (!r) return [];
     return toTravelInfos(r, calcParticipants);
   }, [r, calcParticipants]);
+
+  const planDiffs = useMemo(() => {
+    return results.slice(0, 3).map((res) => {
+      const infos = toTravelInfos(res, calcParticipants);
+      const times = infos
+        .map((it: any) => it.timeMinutes ?? it.durationMinutes ?? it.time)
+        .filter((t): t is number => typeof t === 'number');
+      if (times.length === 0) return null;
+      return Math.max(...times) - Math.min(...times);
+    });
+  }, [results, calcParticipants]);
+
+  // 4단계: 출발지 + 중간지점 + 추천장소 후보까지 통째로 저장
+  const handleSaveCompletePromise = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!r) return;
+    const defaultName = `${r.place.name} 약속`;
+    const finalTitle = saveTitleInput.trim() || defaultName;
+    const ok = form.saveComplete({
+      participants: calcParticipants,
+      title: finalTitle,
+      planIndex: selected,
+      destinationName: r.place.name,
+      picks,
+    });
+    if (ok) {
+      setCompleteSavedMsg(`'${finalTitle}'(추천장소 ${picks.length}곳 포함)이 내 저장 목록에 저장되었어요!`);
+      setSaveTitleInput('');
+    }
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-100/70 font-sans antialiased text-slate-900">
@@ -300,10 +361,12 @@ export default function Home() {
             type="button"
             onClick={() => setActiveTab(SAVED_TAB)}
             className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
-              activeTab === SAVED_TAB ? 'bg-emerald-50 font-black text-emerald-700 border border-emerald-200' : 'text-slate-700 hover:bg-slate-100'
+              activeTab === SAVED_TAB
+                ? 'bg-emerald-50 font-black text-emerald-700 border border-emerald-200'
+                : 'text-slate-700 hover:bg-slate-100'
             }`}
           >
-            내 저장 목록
+            내 저장 목록{form.groups.length > 0 ? ` (${form.groups.length})` : ''}
           </button>
         </header>
       </div>
@@ -311,11 +374,9 @@ export default function Home() {
       {/* Main Layout */}
       <div className="mx-auto flex-1 w-full max-w-7xl px-4 py-4">
         <main className="flex flex-col lg:flex-row h-auto lg:h-[calc(100vh-124px)] w-full gap-5">
-          
           {/* 좌측 패널 (60%) */}
           <section className="w-full lg:w-[58%] xl:w-[60%] shrink-0 overflow-y-auto rounded-2xl bg-white p-6 lg:p-7 shadow-sm border border-slate-200/80 flex flex-col justify-between">
             <div className="space-y-6">
-              
               {showStepNav && (
                 <div className="sticky -top-7 z-10 -mx-7 -mt-7 mb-4 flex items-center justify-between border-b border-slate-100 bg-white/95 backdrop-blur px-7 py-3.5">
                   <button
@@ -330,7 +391,7 @@ export default function Home() {
                       type="button"
                       onClick={goNext}
                       disabled={!canNext}
-                      className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
+                      className="rounded-xl bg-primary px-5 py-2 text-sm font-black text-white shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40 active:scale-95"
                     >
                       {NEXT_LABEL[activeTab] ?? '다음 →'}
                     </button>
@@ -371,47 +432,85 @@ export default function Home() {
               {activeTab === 2 &&
                 (r ? (
                   <div className="space-y-6">
-                    <div className="rounded-2xl bg-emerald-700 p-6 text-white shadow-md space-y-4">
-                      <div className="flex items-center justify-between border-b border-emerald-600/60 pb-3">
-                        <p className="text-xs font-extrabold uppercase tracking-widest text-emerald-200">
-                          Meetly 최적 중간지점 추천
+                    <div className="rounded-2xl bg-emerald-50/70 border border-emerald-200/80 p-5 sm:p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-black uppercase tracking-wider text-emerald-700">
+                          MEETLY 최적 중간지점 추천
                         </p>
-                        <span className="text-[11px] font-black bg-emerald-800/80 px-2.5 py-1 rounded-full text-emerald-100 border border-emerald-600/50">
+                        <span className="text-xs font-extrabold text-emerald-700">
                           총 {results.length}개 추천안
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                         {results.slice(0, 3).map((res, idx) => {
                           const isSelected = selected === idx;
-                          const rankLabel = idx === 0 ? '🥇 1안' : idx === 1 ? '🥈 2안' : '🥉 3안';
+                          const rankLabel = idx === 0 ? '1안' : idx === 1 ? '2안' : '3안';
+                          const diffMin = planDiffs[idx];
+
                           return (
                             <button
                               key={idx}
                               type="button"
                               onClick={() => handleSelect(idx)}
-                              className={`rounded-xl p-3 text-left transition-all ${
+                              className={`rounded-2xl p-4 text-left transition-all border ${
                                 isSelected
-                                  ? 'bg-white text-slate-900 shadow-md font-black scale-[1.02]'
-                                  : 'bg-emerald-800/60 text-emerald-100 hover:bg-emerald-800'
+                                  ? 'bg-emerald-600 border-emerald-600 text-white shadow-md scale-[1.01]'
+                                  : 'bg-white border-emerald-100 text-slate-900 hover:border-emerald-300 shadow-2xs'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${isSelected ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-900/60 text-emerald-200'}`}>
-                                  {rankLabel}
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[11px] font-black px-2 py-0.5 rounded-full ${
+                                    isSelected
+                                      ? 'bg-emerald-500/80 text-white'
+                                      : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'} {rankLabel}
                                 </span>
+
+                                {idx === 0 && (
+                                  <span
+                                    className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                      isSelected
+                                        ? 'bg-amber-300 text-slate-900'
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}
+                                  >
+                                    ★ 가장 공평
+                                  </span>
+                                )}
                               </div>
-                              <p className="mt-1.5 truncate text-base font-black">
+
+                              <p
+                                className={`mt-2.5 truncate text-lg font-black ${
+                                  isSelected ? 'text-white' : 'text-slate-900'
+                                }`}
+                              >
                                 {res.place.name}
                               </p>
+
+                              {diffMin !== null && (
+                                <p
+                                  className={`mt-1 text-xs font-bold ${
+                                    isSelected ? 'text-emerald-100' : 'text-slate-500'
+                                  }`}
+                                >
+                                  {idx === 0
+                                    ? `참석자 간 이동시간 차이 최소 ${diffMin}분`
+                                    : `이동시간 차이 ${diffMin}분`}
+                                </p>
+                              )}
                             </button>
                           );
                         })}
                       </div>
 
                       <div className="pt-1">
-                        <h2 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
-                          📍 선택된 만남 장소: <span className="text-amber-300 underline underline-offset-4">{r.place.name}</span>
+                        <h2 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-1.5">
+                          <span>📍 선택된 만남 장소:</span>
+                          <span className="text-emerald-700">{r.place.name}</span>
                         </h2>
                         {(() => {
                           const times = currentTravelInfos
@@ -425,14 +524,13 @@ export default function Home() {
 
                           return (
                             <>
-                            <p className="mt-1.5 text-xs font-bold text-emerald-100">
-                              참석자 간 이동시간 평균 {avg}분 · 격차 {diff}분
-                            </p>
-
-                            <p className="mt-2 text-[11px] font-medium leading-relaxed text-emerald-100/90">
-                              ※ 이동시간은 거리 기반 예상치이며 실제 대중교통 소요시간과 다를 수 있습니다.
+                              <p className="mt-1.5 text-xs font-extrabold text-slate-700">
+                                참석자 간 이동시간 평균 {avg}분 · 격차 {diff}분
                               </p>
-                              </>
+                              <p className="mt-1 text-[11px] font-medium leading-relaxed text-slate-500">
+                                ※ 이동시간은 거리 기반 예상치이며 실제 대중교통 소요시간과 다를 수 있습니다.
+                              </p>
+                            </>
                           );
                         })()}
                       </div>
@@ -464,11 +562,13 @@ export default function Home() {
                               key={idx}
                               className="flex items-center justify-between rounded-xl bg-white p-3.5 shadow-2xs border border-slate-200/80"
                             >
-                              <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
                                 <span
-                                  className="h-3 w-3 rounded-full shrink-0"
+                                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white"
                                   style={{ backgroundColor: personColor(idx) }}
-                                />
+                                >
+                                  {idx + 1}
+                                </span>
                                 <span className="text-sm font-extrabold text-slate-800 truncate">
                                   {displayName}
                                 </span>
@@ -491,15 +591,15 @@ export default function Home() {
                         <span>📊 세부 이동시간 분포 및 분석 지표 {showDetails ? '접기' : '보기'}</span>
                         {showDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
-                      
+
                       {showDetails && (
                         <div className="p-4 border-t border-slate-200 bg-white space-y-4">
                           <ResultsPanel
-                          results={results}
-                          selected={selected}
-                          detail={
-    <>
-      <TravelChart travelInfos={currentTravelInfos} />
+                            results={results}
+                            selected={selected}
+                            detail={
+                              <>
+                                <TravelChart travelInfos={currentTravelInfos} />
                                 <div className="mt-4 border-t border-slate-100 pt-4">
                                   <b className="text-sm font-bold text-slate-700">개별 출발지에서 길찾기</b>
                                   <div className="mt-2.5 flex flex-wrap gap-2">
@@ -568,7 +668,7 @@ export default function Home() {
               {/* ④ 약속 후보 공유 */}
               {activeTab === 4 &&
                 (r ? (
-                  <div className="space-y-6">
+                  <div className="space-y-5">
                     <div>
                       <h2 className="text-2xl font-black text-slate-900">4 약속 후보 공유</h2>
                       <p className="text-sm font-bold text-slate-600 mt-1">
@@ -576,6 +676,7 @@ export default function Home() {
                       </p>
                     </div>
 
+                    {/* 1. 선택한 약속 후보 목록 */}
                     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                         <p className="text-sm font-bold text-slate-800">
@@ -631,6 +732,7 @@ export default function Home() {
                       )}
                     </div>
 
+                    {/* 2. 메인 액션(Primary CTA): 공유 링크 복사 */}
                     <ShareButton
                       payload={{
                         v: 1,
@@ -655,6 +757,48 @@ export default function Home() {
                       }}
                     />
 
+                    {/* 3. 서브 액션: 출발지 + 중간지점 + 추천장소 후보 전체 저장하기 */}
+                    <form
+                      onSubmit={handleSaveCompletePromise}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-extrabold text-slate-800 flex items-center gap-1.5">
+                            <BookmarkCheck className="w-4 h-4 text-emerald-600" />
+                            이 약속 코스 통째로 저장하기
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            출발지, 선택된 추천안({selected + 1}안 · {r.place.name}), 담은 후보 {picks.length}곳을 &lsquo;내 저장 목록&rsquo;에 함께 보관해요.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={saveTitleInput}
+                          onChange={(e) => setSaveTitleInput(e.target.value)}
+                          placeholder={`모임 이름 (비우면 "${r.place.name} 약속")`}
+                          className="flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          className="shrink-0 rounded-xl border border-emerald-600/30 bg-emerald-50 px-4 py-2.5 text-xs font-black text-emerald-800 hover:bg-emerald-100 transition active:scale-95"
+                        >
+                          내 목록에 저장
+                        </button>
+                      </div>
+
+                      {completeSavedMsg && (
+                        <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+                          <Check className="w-3.5 h-3.5 shrink-0" />
+                          <span>{completeSavedMsg}</span>
+                        </p>
+                      )}
+                    </form>
+
+                    {/* 4. 카카오맵 전체 경로 보기 */}
                     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm flex items-center justify-between">
                       <div>
                         <p className="text-sm font-bold text-slate-800">카카오맵 전체 경로 보기</p>
@@ -681,7 +825,7 @@ export default function Home() {
 
           {/* 우측 지도 패널 */}
           <section className={`relative transition-all duration-300 rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden saturate-[0.85] contrast-[0.95] ${
-            activeTab === 1 
+            activeTab === 1
               ? 'h-[280px] lg:h-full lg:flex-1 opacity-90'
               : 'h-[400px] lg:h-full lg:flex-1'
           }`}>

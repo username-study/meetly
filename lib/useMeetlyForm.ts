@@ -1,19 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deleteGroup, listGroups, loadDraft, saveDraft, saveGroup } from "./storage";
-import type { Participant, SavedGroup } from "./types";
+import {
+  deleteGroup,
+  listGroups,
+  loadDraft,
+  saveCompleteGroup,
+  saveDraft,
+  saveGroup,
+  type ExtendedSavedGroup,
+  type SavedPickItem,
+} from "./storage";
+import type { Participant } from "./types";
 
 export const MIN_PARTICIPANTS = 2;
 export const MAX_PARTICIPANTS = 8;
 
-// 클릭/이벤트 시점에만 호출되는 id 생성 (렌더 중에는 쓰지 않는다)
 const newId = () => Math.random().toString(36).slice(2, 10);
-
-// 초기 상태용: 서버/브라우저 모두 같은 값이 나오도록 고정 id
 const initialParticipant = (n: number): Participant => ({ id: `init-${n}`, name: "", place: null });
-
-// 이벤트 핸들러(참석자 추가 등)에서 쓰는 빈 참가자
 const emptyParticipant = (): Participant => ({ id: newId(), name: "", place: null });
 
 export interface Status {
@@ -21,21 +25,15 @@ export interface Status {
   text: string;
 }
 
-/**
- * 입력 폼의 모든 상태/동작
- * 참석자 목록, 로컬스토리지 임시저장·저장 목록, 안내 문구를 한 곳에서 관리하고
- * page.tsx 는 이 훅의 반환값을 InputForm / SavedGroupsPanel / MapPreview 에 나눠 준다.
- */
-export function useMeetlyForm(options: { onLoaded?: () => void } = {}) {
+export function useMeetlyForm(options: { onLoaded?: (group?: ExtendedSavedGroup) => void } = {}) {
   const [participants, setParticipants] = useState<Participant[]>(() => [initialParticipant(1), initialParticipant(2)]);
   const [hydrated, setHydrated] = useState(false);
-  const [groups, setGroups] = useState<SavedGroup[]>([]);
+  const [groups, setGroups] = useState<ExtendedSavedGroup[]>([]);
   const [status, setStatus] = useState<Status>({ type: "info", text: "입력 내용은 이 브라우저에 자동으로 임시 저장됩니다." });
   const timer = useRef<number | undefined>(undefined);
   const onLoaded = useRef(options.onLoaded);
   onLoaded.current = options.onLoaded;
 
-  // 첫 렌더 뒤 로컬스토리지의 임시 입력/저장 목록 복원 (SSR 불일치 방지)
   useEffect(() => {
     const draft = loadDraft();
     if (draft) setParticipants(draft);
@@ -43,7 +41,6 @@ export function useMeetlyForm(options: { onLoaded?: () => void } = {}) {
     setHydrated(true);
   }, []);
 
-  // 입력이 바뀔 때마다 임시 입력 자동 보관
   useEffect(() => {
     if (hydrated) saveDraft(participants);
   }, [participants, hydrated]);
@@ -76,37 +73,51 @@ export function useMeetlyForm(options: { onLoaded?: () => void } = {}) {
   const remove = (id: string) =>
     setParticipants((ps) => (ps.length <= MIN_PARTICIPANTS ? ps : ps.filter((p) => p.id !== id)));
 
-  const save = () => {
-    if (!saveGroup(participants)) return flash("warn", "저장할 내용이 없거나 브라우저에서 저장이 차단되어 있어요.");
-    setGroups(listGroups());
-    flash("ok", "임시저장 완료! [최근 저장 불러오기]나 '내 저장 목록'에서 다시 쓸 수 있어요.");
+  const save = (customTitle?: string) => {
+    const ok = saveGroup(participants, customTitle);
+    if (!ok) return flash("warn", "저장할 내용이 없거나 브라우저에서 저장이 차단되어 있어요.");
+    const updated = listGroups();
+    setGroups(updated);
+    const savedTitle = updated[0]?.title ?? customTitle ?? "새 모임";
+    flash("ok", `'${savedTitle}' 임시저장 완료! [최근 저장 불러오기]나 '내 저장 목록'에서 다시 쓸 수 있어요.`);
   };
 
-  const load = (g: SavedGroup) => {
-    // id 를 새로 부여해 같은 모임을 여러 번 불러와도 key 충돌이 없게 한다
-    setParticipants(g.participants.map((p) => ({ ...p, id: newId() })));
-    onLoaded.current?.();
+  /** 4단계 완성된 약속(출발지 + 추천안 + 담은 후보 장소) 저장 */
+  const saveComplete = (params: {
+    participants: Participant[];
+    title?: string;
+    planIndex: number;
+    destinationName: string;
+    picks: SavedPickItem[];
+  }) => {
+    const ok = saveCompleteGroup(params);
+    if (!ok) return false;
+    setGroups(listGroups());
+    return true;
+  };
+
+  const load = (g: ExtendedSavedGroup) => {
+    const restoredParticipants = g.participants.map((p) => ({ ...p, id: newId() }));
+    setParticipants(restoredParticipants);
+    onLoaded.current?.({ ...g, participants: restoredParticipants });
     flash("ok", `'${g.title}' 모임을 불러왔어요.`);
   };
 
-  /** [최근 저장 불러오기]: 가장 최근에 저장한 모임 */
   const loadLatest = () => {
     const latest = listGroups()[0];
     if (!latest) return flash("warn", "저장된 모임이 없어요. 출발지를 입력하고 [임시저장]을 눌러 보세요.");
     load(latest);
   };
 
-  /** [초기화]: 입력을 처음 상태(빈 참석자 2명)로 되돌린다. 저장 목록은 건드리지 않는다 */
   const reset = () => {
     setParticipants([emptyParticipant(), emptyParticipant()]);
     flash("info", "입력을 초기화했어요. 저장된 모임은 그대로 남아 있어요.");
   };
 
-  /** [예시로 체험하기]: 주어진 목록으로 입력을 통째로 교체한다 */
-const fillExample = (examples: Omit<Participant, "id">[]) => {
-  setParticipants(examples.map((e) => ({ id: newId(), ...e })));
-  flash("ok", "예시를 채웠어요. [최적 장소 계산하기]를 눌러 보세요!");
-};
+  const fillExample = (examples: Omit<Participant, "id">[]) => {
+    setParticipants(examples.map((e) => ({ id: newId(), ...e })));
+    flash("ok", "예시를 채웠어요. [최적 장소 계산하기]를 눌러 보세요!");
+  };
 
   const removeGroup = (id: string) => {
     deleteGroup(id);
@@ -117,10 +128,8 @@ const fillExample = (examples: Omit<Participant, "id">[]) => {
 
   return {
     participants, groups, status, readyCount, canCalculate,
-    update, add, remove, reset, save, load, loadLatest, removeGroup, fillExample, refreshGroups, flash,
+    update, add, remove, reset, save, saveComplete, load, loadLatest, removeGroup, fillExample, refreshGroups, flash,
   };
 }
-
-
 
 export type MeetlyForm = ReturnType<typeof useMeetlyForm>;

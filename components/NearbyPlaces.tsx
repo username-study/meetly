@@ -17,15 +17,16 @@ export const MAP_MARKER_LIMIT = 12;
 
 type TabCategory = PlaceCategory | 'all' | 'parking';
 
+// InputForm, page.tsx, 지도 핀과 동일한 8색 팔레트
 const PERSON_COLORS = [
-  '#2f6fed',
-  '#e5484d',
-  '#0d9ea3',
-  '#d6409f',
-  '#8b5e3c',
-  '#3e63dd',
-  '#5b6b7f',
-  '#c2410c',
+  '#2f6fed', // 1: 파랑
+  '#ef4444', // 2: 빨강
+  '#10b981', // 3: 초록
+  '#f59e0b', // 4: 주황
+  '#8b5cf6', // 5: 보라
+  '#ec4899', // 6: 핑크
+  '#06b6d4', // 7: 청록
+  '#64748b', // 8: 슬레이트
 ];
 const personColor = (i: number) => PERSON_COLORS[i % PERSON_COLORS.length];
 
@@ -128,7 +129,7 @@ export function NearbyPlaces({
   selectedPlaceId,
   onSelectPlace,
   travelInfos = [],
-  participants = [], // 👈 [수정 포인트] props에서 받아오도록 기본값 포함하여 선언
+  participants = [],
 }: Props) {
   const [tab, setTab] = useState<TabCategory>('all');
   const [loading, setLoading] = useState(false);
@@ -323,10 +324,8 @@ export function NearbyPlaces({
                 }}
                 className={`cursor-pointer rounded-2xl border p-4 transition-all duration-200 ${
                   isSelected
-                    ? 'border-emerald-600 bg-emerald-50/30 ring-2 ring-emerald-500 shadow-md'
-                    : isPicked
-                    ? 'border-amber-400 bg-amber-50/70'
-                    : 'border-slate-200/80 bg-white hover:border-slate-300'
+                    ? 'border-primary/70 bg-blue-50/25 ring-2 ring-primary/15 shadow-sm'
+                    : 'border-slate-200/80 bg-white hover:border-slate-300 shadow-2xs'
                 }`}
               >
                 {/* 1줄: 아이콘 + 이름/별점 + 담기 */}
@@ -352,7 +351,7 @@ export function NearbyPlaces({
                     onClick={() => onTogglePick(it)}
                     className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-all active:scale-95 ${
                       isPicked
-                        ? 'bg-amber-400 text-white hover:bg-amber-500'
+                        ? 'bg-amber-400 text-white shadow-2xs hover:bg-amber-500'
                         : 'border border-slate-200/60 bg-slate-100 text-slate-700 hover:bg-amber-100 hover:text-amber-800'
                     }`}
                   >
@@ -370,7 +369,7 @@ export function NearbyPlaces({
                   </p>
                 </div>
 
-                {/* 🌟 참석자별 총 이동 예상 시간 칩 (입력된 이름 우선 노출) */}
+                {/* 참석자별 총 이동 예상 시간 칩 */}
                 {travelInfos.length > 0 && (
                   <div className="mt-3 rounded-xl bg-slate-50 p-2.5 border border-slate-100">
                     <p className="text-[10px] font-bold text-slate-400 mb-1.5">⏱️ 참석자별 총 이동 예상 시간</p>
@@ -393,9 +392,11 @@ export function NearbyPlaces({
                             className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 border border-slate-200/80 shadow-2xs"
                           >
                             <span
-                              className="h-2 w-2 rounded-full shrink-0"
+                              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-extrabold text-white"
                               style={{ backgroundColor: personColor(idx) }}
-                            />
+                            >
+                              {idx + 1}
+                            </span>
                             <span>{displayName}</span>
                             <b className="text-emerald-700">{totalTime}분</b>
                           </span>
